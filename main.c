@@ -4,26 +4,46 @@
 #include <string.h>
 #include <direct.h>
 #include <windows.h>
-#define MAX_PATH 260
+#include <process.h>
+#include <tlhelp32.h>
 
+#define MAX_PATH 260
 #define BUFFER_SIZE 1024
 
-void read_config(char *path)
+HANDLE create_mutex(const char *name)
 {
-	FILE *fp = fopen("path.txt", "r");
-	if (fp == NULL)
+	HANDLE mutex = CreateMutex(NULL, FALSE, name);
+	if (mutex == NULL)
 	{
-		perror("Could not open path.txt");
+		fprintf(stderr, "Failed to create mutex: %d\n", GetLastError());
 		exit(EXIT_FAILURE);
 	}
-
-	fgets(path, BUFFER_SIZE, fp);
-	path[strcspn(path, "\n")] = 0;
-
-	fclose(fp);
+	return mutex;
 }
 
-void run_game(char *path)
+BOOL is_process_running(const char *process_name)
+{
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	PROCESSENTRY32 entry;
+	entry.dwSize = sizeof(PROCESSENTRY32);
+
+	if (Process32First(snapshot, &entry))
+	{
+		do
+		{
+			if (_stricmp(entry.szExeFile, process_name) == 0)
+			{
+				CloseHandle(snapshot);
+				return TRUE;
+			}
+		} while (Process32Next(snapshot, &entry));
+	}
+
+	CloseHandle(snapshot);
+	return FALSE;
+}
+
+void run_game(const char *path)
 {
 	char exe_path[BUFFER_SIZE];
 	char steam_api_path[BUFFER_SIZE];
@@ -56,12 +76,41 @@ void run_game(char *path)
 	}
 }
 
+void run_game_with_mutex(const char *hash, const char *path)
+{
+	if (is_process_running("TestDrive2.exe"))
+	{
+		fprintf(stderr, "Game is already running!\n");
+		return;
+	}
+
+	HANDLE mutex = create_mutex(hash);
+	run_game(path);
+	WaitForSingleObject(mutex, INFINITE);
+	ReleaseMutex(mutex);
+}
+
+void read_config(char *path)
+{
+	FILE *fp = fopen("path.txt", "r");
+	if (fp == NULL)
+	{
+		perror("Could not open path.txt");
+		exit(EXIT_FAILURE);
+	}
+
+	fgets(path, BUFFER_SIZE, fp);
+	path[strcspn(path, "\n")] = 0;
+
+	fclose(fp);
+}
+
 int main()
 {
 	char path[BUFFER_SIZE];
-
 	read_config(path);
-	run_game(path);
+
+	run_game_with_mutex("wont_leak_da_hash", path);
 
 	return 0;
 }
