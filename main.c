@@ -9,6 +9,8 @@
 
 #define MAX_PATH 260
 #define BUFFER_SIZE 1024
+#define EXE_NAME "TestDrive2.exe"
+#define CONFIG_PATH "config.ini"
 
 HANDLE create_mutex(const char *name)
 {
@@ -26,6 +28,7 @@ BOOL is_process_running(const char *process_name)
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	PROCESSENTRY32 entry;
 	entry.dwSize = sizeof(PROCESSENTRY32);
+	BOOL process_found = FALSE;
 
 	if (Process32First(snapshot, &entry))
 	{
@@ -33,14 +36,14 @@ BOOL is_process_running(const char *process_name)
 		{
 			if (_stricmp(entry.szExeFile, process_name) == 0)
 			{
-				CloseHandle(snapshot);
-				return TRUE;
+				process_found = TRUE;
+				break;
 			}
 		} while (Process32Next(snapshot, &entry));
 	}
 
 	CloseHandle(snapshot);
-	return FALSE;
+	return process_found;
 }
 
 void run_game(const char *path)
@@ -50,24 +53,31 @@ void run_game(const char *path)
 	char ul_steam_api_path[BUFFER_SIZE];
 	char exe_path_quoted[BUFFER_SIZE];
 
-	sprintf(exe_path, "%s/TestDrive2.exe", path);
-	sprintf(steam_api_path, "%s/steam_api.dll", path);
-	sprintf(ul_steam_api_path, "%s/UL_steam_api.dll", path);
-	sprintf(exe_path_quoted, "\"%s\"", exe_path);
+	snprintf(exe_path, BUFFER_SIZE, "%s/TestDrive2.exe", path);
+	snprintf(steam_api_path, BUFFER_SIZE, "%s/steam_api.dll", path);
+	snprintf(ul_steam_api_path, BUFFER_SIZE, "%s/UL_steam_api.dll", path);
+	snprintf(exe_path_quoted, BUFFER_SIZE, "\"%s\"", exe_path);
 
 	if (_access(exe_path, 0) != -1)
 	{
-		if (_access(steam_api_path, 0) != -1)
+		if (_access(steam_api_path, 0) != -1 && rename(steam_api_path, ul_steam_api_path) != 0)
 		{
-			rename(steam_api_path, ul_steam_api_path);
+			fprintf(stderr, "Failed to rename %s to %s\n", steam_api_path, ul_steam_api_path);
+			exit(EXIT_FAILURE);
 		}
 
-		_chdir(path);
+		if (_chdir(path) != 0)
+		{
+			perror("Could not change directory");
+			exit(EXIT_FAILURE);
+		}
+
 		system(exe_path_quoted);
 
-		if (_access(ul_steam_api_path, 0) != -1)
+		if (_access(ul_steam_api_path, 0) != -1 && rename(ul_steam_api_path, steam_api_path) != 0)
 		{
-			rename(ul_steam_api_path, steam_api_path);
+			fprintf(stderr, "Failed to rename %s to %s\n", ul_steam_api_path, steam_api_path);
+			exit(EXIT_FAILURE);
 		}
 	}
 	else
@@ -78,7 +88,7 @@ void run_game(const char *path)
 
 void run_game_with_mutex(const char *hash, const char *path)
 {
-	if (is_process_running("TestDrive2.exe"))
+	if (is_process_running(EXE_NAME))
 	{
 		fprintf(stderr, "Game is already running!\n");
 		return;
@@ -86,31 +96,66 @@ void run_game_with_mutex(const char *hash, const char *path)
 
 	HANDLE mutex = create_mutex(hash);
 	run_game(path);
-	WaitForSingleObject(mutex, INFINITE);
-	ReleaseMutex(mutex);
+
+	if (WaitForSingleObject(mutex, INFINITE) != WAIT_OBJECT_0)
+	{
+		fprintf(stderr, "Failed to wait for mutex: %d\n", GetLastError());
+		exit(EXIT_FAILURE);
+	}
+	if (!ReleaseMutex(mutex))
+	{
+		fprintf(stderr, "Failed to release mutex: %d\n", GetLastError());
+		exit(EXIT_FAILURE);
+	}
+	if (!CloseHandle(mutex))
+	{
+		fprintf(stderr, "Failed to close mutex handle: %d\n", GetLastError());
+		exit(EXIT_FAILURE);
+	}
 }
 
-void read_config(char *path)
+void read_config(char *path, char *mutex_name)
 {
-	FILE *fp = fopen("path.txt", "r");
-	if (fp == NULL)
+	FILE *file = fopen(CONFIG_PATH, "r");
+	if (file == NULL)
 	{
-		perror("Could not open path.txt");
+		perror("Could not open " CONFIG_PATH);
 		exit(EXIT_FAILURE);
 	}
 
-	fgets(path, BUFFER_SIZE, fp);
-	path[strcspn(path, "\n")] = 0;
+	char line[BUFFER_SIZE];
+	while (fgets(line, sizeof(line), file))
+	{
+		if (line[0] == '#')
+		{
+			continue;
+		}
+		if (strncmp(line, "TDU2_PATH=", 10) == 0)
+		{
+			strncpy(path, line + 10, BUFFER_SIZE - 1);
+			path[strcspn(path, "\n")] = 0;
+		}
+		else if (strncmp(line, "MUTEX_NAME=", 11) == 0)
+		{
+			strncpy(mutex_name, line + 11, BUFFER_SIZE - 1);
+			mutex_name[strcspn(mutex_name, "\n")] = 0;
+		}
+	}
 
-	fclose(fp);
+	if (fclose(file) != 0)
+	{
+		perror("Could not close " CONFIG_PATH);
+		exit(EXIT_FAILURE);
+	}
 }
 
 int main()
 {
 	char path[BUFFER_SIZE];
-	read_config(path);
+	char mutex_name[BUFFER_SIZE];
+	read_config(path, mutex_name);
 
-	run_game_with_mutex("wont_leak_da_hash", path);
+	run_game_with_mutex(mutex_name, path);
 
 	return 0;
 }

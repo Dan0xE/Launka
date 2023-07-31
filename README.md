@@ -12,7 +12,7 @@ This is a small launcher for Test Drive Unlimited 2
 ## Setup
 
 - Download the code from this repo.
-- Ensure a text file named "path.txt" exists in the same directory as the executable. This file should contain the absolute path to your TDU2 directory (e.g., `C:\Test Drive Unlimited 2`).
+- Ensure an .ini file named "config.ini" exists (rename the config.example file to config.ini) in the same directory as the executable. This file should contain the absolute path to your TDU2 directory and the Mutex Name (e.g., `TDU2_PATH=C:\Test Drive Unlimited 2` and `MUTEX_NAME=your_solution`).
 
 ## Usage
 
@@ -20,7 +20,11 @@ Run the executable to start the game.
 
 ## Functionality
 
-The launcher reads the TDU2 directory path from "path.txt", starts the game, temporarily renames "steam_api.dll" to "UL_steam_api.dll", and reverts it back upon closure.
+To get the Mutex Name, decrypt the following Blowfish encrypted string with the key that is the lowercase boolean representation of 1
+
+SVKFvl8ULBykxomtsdDYQQ
+
+Use the decrypted solution in place of "your_solution" in the line MUTEX_NAME=your_solution of the "config.ini" file.
 
 ## Support
 
